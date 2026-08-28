@@ -15,12 +15,12 @@ import numpy as np
 import torch
 
 from env import ACTION_NAMES, TEAMMATES, GridWorld
-from ego_agent import EgoAgent
+from ego_agent import EgoAgent, init_history, push_history
 
 
 def run_episode(env, agent, epsilon, rng, verbose=True):
     obs = env.reset()
-    agent.reset()
+    history = init_history(agent.history_len)
     total_reward = 0.0
 
     if verbose:
@@ -29,7 +29,8 @@ def run_episode(env, agent, epsilon, rng, verbose=True):
         print(env.render())
 
     for step in range(1, env.max_steps + 1):
-        action, out = agent.act(obs, epsilon=epsilon, rng=rng)
+        history = push_history(history, obs)
+        action, out = agent.act(obs, history, epsilon=epsilon, rng=rng)
         obs, reward, done, info = env.step(action)
         total_reward += reward
 

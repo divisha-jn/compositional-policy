@@ -71,11 +71,36 @@ class Composer(nn.Module):
         return torch.softmax(logits, dim=-1)  # (batch, K)
 
 
+def init_history(history_len=HISTORY_LEN):
+    """A fresh, empty history buffer for the start of an episode."""
+    return [(0.0, 0.0)] * history_len
+
+
+def push_history(history, obs):
+    """Return a new history buffer with obs's relative teammate position
+    appended (oldest entry dropped). Pure -- does not mutate `history`."""
+    # obs layout: ego(2), teammate(2), goalA(2), goalB(2), all in [0, 1]
+    ego = obs[0:2]
+    teammate = obs[2:4]
+    rel = (float(teammate[0] - ego[0]), float(teammate[1] - ego[1]))
+    return (history + [rel])[-len(history):]
+
+
+def epsilon_greedy_action(q_values, epsilon, rng):
+    """epsilon-greedy over a 1D tensor of Q-values. rng is a numpy Generator."""
+    if rng.random() < epsilon:
+        return int(rng.integers(q_values.shape[0]))
+    return int(torch.argmax(q_values).item())
+
+
 class EgoAgent(nn.Module):
     """Wires encoder + basis + composer into one acting policy.
 
-    Call reset() at the start of each episode, then act(obs) each step.
-    act() maintains its own history buffer of relative teammate positions.
+    Stateless: the caller owns the history buffer (see init_history /
+    push_history above) and passes it into compute()/act() each step. This
+    keeps the module a pure function of (obs, history), which is what a
+    Q-learning update needs -- it must query Q(s_t) and Q(s_{t+1}) with two
+    different, precisely-known histories.
     """
 
     def __init__(self, num_components=2, obs_dim=OBS_DIM, num_actions=NUM_ACTIONS,
@@ -91,30 +116,18 @@ class EgoAgent(nn.Module):
         self.composer = Composer(encoder_dim=self.encoder.hidden_size, obs_dim=obs_dim,
                                   num_components=num_components)
 
-        self._history = None  # deque-like list of (dx, dy), filled on reset()
+    def compute(self, obs, history):
+        """Run a forward pass for a single (obs, history) pair.
 
-    def reset(self):
-        self._history = [(0.0, 0.0)] * self.history_len
-
-    def _push_history(self, obs):
-        # obs layout: ego(2), teammate(2), goalA(2), goalB(2), all in [0, 1]
-        ego = obs[0:2]
-        teammate = obs[2:4]
-        rel = (teammate[0] - ego[0], teammate[1] - ego[1])
-        self._history.append(rel)
-        self._history = self._history[-self.history_len:]
-
-    def compute(self, obs):
-        """Run a forward pass for a single observation (numpy array, shape (OBS_DIM,)).
+        obs: numpy array, shape (OBS_DIM,). history: list of history_len
+        (dx, dy) tuples, as produced/maintained via push_history().
 
         Returns a dict with combined Q-values, per-component Q-values, and
         the composer's mixture weights -- useful for both acting and for the
         Stage 4/5 diagnostics later.
         """
-        self._push_history(obs)
-
         obs_t = torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)  # (1, obs_dim)
-        history_t = torch.as_tensor(self._history, dtype=torch.float32).unsqueeze(0)  # (1, T, 2)
+        history_t = torch.as_tensor(history, dtype=torch.float32).unsqueeze(0)  # (1, T, 2)
 
         encoder_out = self.encoder(history_t)  # (1, hidden)
         weights = self.composer(encoder_out, obs_t)  # (1, K)
@@ -129,14 +142,13 @@ class EgoAgent(nn.Module):
             "weights": weights.squeeze(0),
         }
 
-    def act(self, obs, epsilon=0.0, rng=None):
-        """Pick an action for the current observation. epsilon>0 adds random
-        exploration (unused for now, since nothing is trained yet)."""
-        out = self.compute(obs)
+    def act(self, obs, history, epsilon=0.0, rng=None):
+        """Pick an action for the current (obs, history). epsilon>0 adds
+        random exploration."""
+        out = self.compute(obs, history)
         if epsilon > 0.0:
-            rng = rng or np.random.default_rng()
-            if rng.random() < epsilon:
-                action = int(rng.integers(self.num_actions))
-                return action, out
-        action = int(torch.argmax(out["q_combined"]).item())
+            rng = rng if rng is not None else np.random.default_rng()
+            action = epsilon_greedy_action(out["q_combined"], epsilon, rng)
+        else:
+            action = int(torch.argmax(out["q_combined"]).item())
         return action, out
