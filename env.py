@@ -60,18 +60,60 @@ class ScriptedTeammate:
         self.move_prob = move_prob
         self.name = name or f"goal{goal_idx}_p{move_prob}"
 
-    def act(self, teammate_pos, rng):
+    def reset(self):
+        pass  # stateless -- nothing to reset between episodes
+
+    def act(self, teammate_pos, ego_pos, rng):
         if rng.random() > self.move_prob:
             return 4  # STAY
         target = GOALS[self.goal_idx]
         return _greedy_action_towards(teammate_pos, target)
 
 
-# Three scripted teammates differing along goal-preference and speed axes.
+class WaitThenGoTeammate:
+    """Stands still until the ego agent comes within `trigger_distance`,
+    then greedily walks to its preferred goal -- and keeps going even if the
+    ego later moves away again.
+
+    This is a qualitatively different behavioral axis from ScriptedTeammate:
+    it isn't just "walk to a fixed point," it's conditional on the ego's
+    behavior. In particular, whether a given (teammate stationary) snapshot
+    means "hasn't been triggered yet" or "was triggered, but move_prob-like
+    luck" is NOT recoverable from a single observation -- telling them apart
+    needs history. Since the basis components in ego_agent.py are memoryless
+    (obs -> Q, no history), this is meant to probe whether a fixed/adaptively
+    mixed basis can still cope, or whether the missing memory shows up as
+    real regret.
+    """
+
+    def __init__(self, goal_idx, trigger_distance=2, name=None):
+        self.goal_idx = goal_idx
+        self.trigger_distance = trigger_distance
+        self.name = name or f"wait_then_goal{goal_idx}"
+        self.triggered = False
+
+    def reset(self):
+        self.triggered = False
+
+    def act(self, teammate_pos, ego_pos, rng):
+        if not self.triggered:
+            dist = abs(teammate_pos[0] - ego_pos[0]) + abs(teammate_pos[1] - ego_pos[1])
+            if dist <= self.trigger_distance:
+                self.triggered = True
+            else:
+                return 4  # STAY -- waiting for the ego to approach
+        target = GOALS[self.goal_idx]
+        return _greedy_action_towards(teammate_pos, target)
+
+
+# Four scripted teammates: goal preference, speed, and now a "waits for the
+# ego to approach before committing to a goal" behavior that can't be
+# reduced to walking toward a fixed point.
 TEAMMATES = {
     "goal_a": ScriptedTeammate(goal_idx=0, move_prob=1.0, name="goal_a"),
     "goal_b": ScriptedTeammate(goal_idx=1, move_prob=1.0, name="goal_b"),
     "slow_goal_a": ScriptedTeammate(goal_idx=0, move_prob=0.4, name="slow_goal_a"),
+    "wait_then_b": WaitThenGoTeammate(goal_idx=1, trigger_distance=2, name="wait_then_b"),
 }
 
 
@@ -90,6 +132,7 @@ class GridWorld:
         self.ego_pos = (GRID_SIZE - 1, 0)
         self.teammate_pos = (0, GRID_SIZE - 1)
         self.t = 0
+        self.teammate.reset()
         return self._obs()
 
     def _obs(self):
@@ -103,7 +146,7 @@ class GridWorld:
         return np.array(vals, dtype=np.float32) / (GRID_SIZE - 1)
 
     def step(self, ego_action):
-        teammate_action = self.teammate.act(self.teammate_pos, self.rng)
+        teammate_action = self.teammate.act(self.teammate_pos, self.ego_pos, self.rng)
         self.ego_pos = _move(self.ego_pos, ego_action)
         self.teammate_pos = _move(self.teammate_pos, teammate_action)
         self.t += 1

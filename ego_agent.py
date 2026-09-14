@@ -142,6 +142,15 @@ class EgoAgent(nn.Module):
             "weights": weights.squeeze(0),
         }
 
+    def compute_batch(self, obs_batch, history_batch):
+        """Batched version of compute(), for minibatch training. obs_batch:
+        tensor (B, obs_dim). history_batch: tensor (B, T, 2). Returns just
+        q_combined (B, num_actions) -- all that a TD loss needs."""
+        encoder_out = self.encoder(history_batch)  # (B, hidden)
+        weights = self.composer(encoder_out, obs_batch)  # (B, K)
+        q_per_component = torch.stack([comp(obs_batch) for comp in self.basis], dim=1)  # (B, K, A)
+        return (weights.unsqueeze(-1) * q_per_component).sum(dim=1)  # (B, A)
+
     def act(self, obs, history, epsilon=0.0, rng=None):
         """Pick an action for the current (obs, history). epsilon>0 adds
         random exploration."""
