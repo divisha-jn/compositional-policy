@@ -85,7 +85,7 @@ def evaluate(agent, teammate_name, num_episodes, seed):
 
 
 def train_agent(episodes=8000, gamma=0.95, lr=1e-3, eps_start=1.0, eps_end=0.05,
-                 log_every=None, seed=0, verbose=True):
+                 log_every=None, seed=0, verbose=True, num_components=2):
     """Trains a fresh compositional EgoAgent against a random mix of the
     scripted teammates. Returns the trained agent. Used by both this
     script's CLI and by regret.py (Stage 4), which needs a trained
@@ -93,7 +93,7 @@ def train_agent(episodes=8000, gamma=0.95, lr=1e-3, eps_start=1.0, eps_end=0.05,
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
 
-    agent = EgoAgent(num_components=2)
+    agent = EgoAgent(num_components=num_components)
     optimizer = torch.optim.Adam(agent.parameters(), lr=lr)
 
     teammate_names = list(TEAMMATES.keys())
@@ -134,13 +134,16 @@ def main():
     parser.add_argument("--eval-episodes", type=int, default=50)
     parser.add_argument("--log-every", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--num-components", type=int, default=2,
+                         help="K, the number of basis components")
     parser.add_argument("--save", type=str, default=None,
                          help="optional path to save trained weights, e.g. ego_agent.pt")
     args = parser.parse_args()
 
     agent = train_agent(episodes=args.episodes, gamma=args.gamma, lr=args.lr,
                          eps_start=args.eps_start, eps_end=args.eps_end,
-                         log_every=args.log_every, seed=args.seed, verbose=True)
+                         log_every=args.log_every, seed=args.seed, verbose=True,
+                         num_components=args.num_components)
 
     print("\n--- final greedy evaluation (epsilon=0) ---")
     for name in TEAMMATES:

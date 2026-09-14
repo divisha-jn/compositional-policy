@@ -55,12 +55,15 @@ def main():
     parser.add_argument("--regret-threshold", type=float, default=1.0,
                          help="flag as a basis problem above this regret")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--num-components", type=int, default=2,
+                         help="K, the number of basis components (try 1 to sanity-check "
+                              "that the diagnostic correctly blames the basis, not the composer)")
     args = parser.parse_args()
 
     print("=== training Stage-3 compositional agent (basis to be frozen) ===")
     agent = train_agent(episodes=args.agent_episodes, gamma=args.gamma, lr=args.lr,
                          eps_start=args.eps_start, eps_end=args.eps_end,
-                         seed=args.seed, verbose=True)
+                         seed=args.seed, verbose=True, num_components=args.num_components)
     agent.eval()
     for param in agent.basis.parameters():
         param.requires_grad_(False)
