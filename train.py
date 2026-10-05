@@ -85,8 +85,9 @@ def run_training_episode(env, agent, target_agent, optimizer, buffer, gamma, eps
                           batch_size, min_buffer_size):
     """Plays one episode, pushing each transition into the replay buffer and
     (once there's enough data) taking one minibatch TD update per step
-    against the frozen target network. Returns the total (undiscounted)
-    reward for the episode."""
+    against the frozen target network. Returns (total_reward, final info
+    dict) -- the full dict, not just a "success" field, since different
+    environments (e.g. env_blocking.py) report different things."""
     obs = env.reset()
     history = init_history(agent.history_len)
     total_reward = 0.0
@@ -113,7 +114,7 @@ def run_training_episode(env, agent, target_agent, optimizer, buffer, gamma, eps
         if done:
             break
 
-    return total_reward, info["success"]
+    return total_reward, info
 
 
 @torch.no_grad()
@@ -170,11 +171,11 @@ def train_agent(episodes=8000, gamma=0.95, lr=1e-3, eps_start=1.0, eps_end=0.05,
     for ep in range(1, episodes + 1):
         epsilon = linear_epsilon(ep, episodes, eps_start, eps_end)
         name = teammate_names[rng.integers(len(teammate_names))]
-        ep_return, success = run_training_episode(
+        ep_return, info = run_training_episode(
             envs[name], agent, target_agent, optimizer, buffer, gamma, epsilon, rng,
             batch_size, min_buffer_size)
         recent_returns[name].append(ep_return)
-        recent_success[name].append(float(success))
+        recent_success[name].append(float(info["success"]))
 
         if ep % target_update_every == 0:
             target_agent.load_state_dict(agent.state_dict())
