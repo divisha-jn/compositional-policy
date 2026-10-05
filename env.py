@@ -6,17 +6,18 @@ cell at the same time. Which goal the teammate heads for (and how fast, and
 under what conditions) depends on its scripted policy -- this is the
 "teammate type" the ego agent must adapt to.
 
-Of the grid's 4 corners, (0,0) and (4,4) are goals A and B, (4,0) is the
-ego's own spawn point and also goal C, and (0,4) is the teammate's spawn
-point. (0,4) was deliberately NOT also made a goal: a teammate targeting
-its own spawn cell would never move at all (greedy-towards-self is always
-STAY) -- a degenerate case, not a meaningfully new corner to generalize to.
+All 4 corners are goals: (0,0)=A, (4,4)=B, (4,0)=C (the ego's own spawn
+point), (0,4)=D (the teammate's own spawn point). D is a degenerate target
+for any teammate -- greedy-towards-self is always STAY, so a teammate
+aimed at D never moves -- kept in anyway (as of Stage 7's teammate_search.py)
+so the generator's corner x speed x wait-pattern grid is genuinely
+data-driven rather than hand-filtered to "the corners that work out nicely".
 """
 
 import numpy as np
 
 GRID_SIZE = 5
-GOALS = [(0, 0), (4, 4), (4, 0)]  # goal A, goal B, goal C
+GOALS = [(0, 0), (4, 4), (4, 0), (0, 4)]  # goal A, goal B, goal C, goal D
 
 # actions: up, down, left, right, stay
 ACTIONS = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
@@ -92,9 +93,10 @@ class WaitThenGoTeammate:
     real regret.
     """
 
-    def __init__(self, goal_idx, trigger_distance=2, name=None):
+    def __init__(self, goal_idx, trigger_distance=2, move_prob=1.0, name=None):
         self.goal_idx = goal_idx
         self.trigger_distance = trigger_distance
+        self.move_prob = move_prob
         self.name = name or f"wait_then_goal{goal_idx}"
         self.triggered = False
 
@@ -108,6 +110,8 @@ class WaitThenGoTeammate:
                 self.triggered = True
             else:
                 return 4  # STAY -- waiting for the ego to approach
+        if rng.random() > self.move_prob:
+            return 4  # STAY -- triggered, but slow (same speed axis as ScriptedTeammate)
         target = GOALS[self.goal_idx]
         return _greedy_action_towards(teammate_pos, target)
 
