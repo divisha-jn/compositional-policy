@@ -20,6 +20,10 @@ regret = J(best_response) - J(best_composition), logged per teammate. A
 large regret means the fixed basis (no matter how you mix it) can't match a
 specialist -- i.e. the basis is missing something a specialist has. This
 script only measures; it doesn't feed back into training.
+
+Reports this separately for env.TRAIN_TEAMMATES (what the Stage-3 agent
+trained on) and env.TEST_TEAMMATES (held out entirely from training) so
+in-distribution regret can be compared against generalization regret.
 """
 
 import argparse
@@ -27,7 +31,7 @@ import argparse
 import numpy as np
 import torch
 
-from env import GridWorld, TEAMMATES
+from env import GridWorld, TEAMMATES, TEST_TEAMMATES, TRAIN_TEAMMATES
 from ego_agent import QComponent, epsilon_greedy_action
 from train import linear_epsilon, train_agent
 
@@ -120,6 +124,28 @@ def search_best_composition(basis, teammate_name, num_episodes, seed, resolution
     return best_return, best_weights, best_success
 
 
+def report_regret(agent, teammate_names, oracle_episodes, gamma, lr, eps_start, eps_end,
+                   eval_episodes, search_resolution, seed):
+    header = f"{'teammate':14s} {'J(best_response)':>18s} {'J(best_composition)':>20s} {'regret':>10s} {'best_w':>16s}"
+    print(header)
+    print("-" * len(header))
+
+    for name in teammate_names:
+        oracle_net = train_oracle(name, oracle_episodes, gamma, lr, eps_start, eps_end, seed=seed + 1)
+        oracle_env = GridWorld(teammate=TEAMMATES[name], seed=seed + 100)
+        oracle_policy = lambda obs, net=oracle_net: int(torch.argmax(
+            net(torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)).squeeze(0)).item())
+        j_best_response, br_success = evaluate_policy(oracle_policy, oracle_env, eval_episodes)
+
+        j_best_composition, best_w, bc_success = search_best_composition(
+            agent.basis, name, eval_episodes, seed=seed + 200, resolution=search_resolution)
+
+        regret = j_best_response - j_best_composition
+        w_str = "[" + ", ".join(f"{x:.2f}" for x in best_w) + "]"
+        print(f"{name:14s} {j_best_response:18.2f} {j_best_composition:20.2f} {regret:10.2f} {w_str:>16s}")
+        print(f"{'':14s} (success={br_success:.2f}){'':7s}(success={bc_success:.2f})")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent-episodes", type=int, default=8000,
@@ -138,6 +164,7 @@ def main():
     args = parser.parse_args()
 
     print("=== training Stage-3 compositional agent (basis to be frozen) ===")
+    print(f"(trained only on: {list(TRAIN_TEAMMATES)})")
     agent = train_agent(episodes=args.agent_episodes, gamma=args.gamma, lr=args.lr,
                          eps_start=args.eps_start, eps_end=args.eps_end,
                          seed=args.seed, verbose=True)
@@ -145,27 +172,13 @@ def main():
     for param in agent.basis.parameters():
         param.requires_grad_(False)
 
-    print("\n=== per-teammate regret ===")
-    header = f"{'teammate':14s} {'J(best_response)':>18s} {'J(best_composition)':>20s} {'regret':>10s} {'best_w':>16s}"
-    print(header)
-    print("-" * len(header))
+    print("\n=== regret: TRAIN teammates ===")
+    report_regret(agent, list(TRAIN_TEAMMATES), args.oracle_episodes, args.gamma, args.lr,
+                  args.eps_start, args.eps_end, args.eval_episodes, args.search_resolution, args.seed)
 
-    for name in TEAMMATES:
-        oracle_net = train_oracle(name, args.oracle_episodes, args.gamma, args.lr,
-                                   args.eps_start, args.eps_end, seed=args.seed + 1)
-        oracle_env = GridWorld(teammate=TEAMMATES[name], seed=args.seed + 100)
-        oracle_policy = lambda obs: int(torch.argmax(
-            oracle_net(torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)).squeeze(0)).item())
-        j_best_response, br_success = evaluate_policy(oracle_policy, oracle_env, args.eval_episodes)
-
-        j_best_composition, best_w, bc_success = search_best_composition(
-            agent.basis, name, args.eval_episodes, seed=args.seed + 200,
-            resolution=args.search_resolution)
-
-        regret = j_best_response - j_best_composition
-        w_str = "[" + ", ".join(f"{x:.2f}" for x in best_w) + "]"
-        print(f"{name:14s} {j_best_response:18.2f} {j_best_composition:20.2f} {regret:10.2f} {w_str:>16s}")
-        print(f"{'':14s} (success={br_success:.2f}){'':7s}(success={bc_success:.2f})")
+    print("\n=== regret: HELD-OUT TEST teammates ===")
+    report_regret(agent, list(TEST_TEAMMATES), args.oracle_episodes, args.gamma, args.lr,
+                  args.eps_start, args.eps_end, args.eval_episodes, args.search_resolution, args.seed)
 
 
 if __name__ == "__main__":

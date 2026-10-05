@@ -106,15 +106,27 @@ class WaitThenGoTeammate:
         return _greedy_action_towards(teammate_pos, target)
 
 
-# Four scripted teammates: goal preference, speed, and now a "waits for the
-# ego to approach before committing to a goal" behavior that can't be
-# reduced to walking toward a fixed point.
-TEAMMATES = {
+# Stage-3 training set: goal preference (A vs B) and the "waits for the ego
+# to approach before committing to a goal" behavior.
+TRAIN_TEAMMATES = {
     "goal_a": ScriptedTeammate(goal_idx=0, move_prob=1.0, name="goal_a"),
     "goal_b": ScriptedTeammate(goal_idx=1, move_prob=1.0, name="goal_b"),
-    "slow_goal_a": ScriptedTeammate(goal_idx=0, move_prob=0.4, name="slow_goal_a"),
     "wait_then_b": WaitThenGoTeammate(goal_idx=1, trigger_distance=2, name="wait_then_b"),
 }
+
+# Held out of training entirely, for the Stage 4/5 generalization check.
+# slow_goal_a shares a trait with a training teammate (goal_idx=0, same
+# target as goal_a) but isn't identical to anything the agent trained
+# against (the move_prob=0.4 slowness is new) -- a deliberately "close but
+# not seen" probe, not a wildly different teammate.
+TEST_TEAMMATES = {
+    "slow_goal_a": ScriptedTeammate(goal_idx=0, move_prob=0.4, name="slow_goal_a"),
+}
+
+# Convenience union, for anything that looks a teammate up by name without
+# caring whether it's a training or held-out one (e.g. training a
+# best-response oracle, which is always teammate-specific regardless).
+TEAMMATES = {**TRAIN_TEAMMATES, **TEST_TEAMMATES}
 
 
 class GridWorld:

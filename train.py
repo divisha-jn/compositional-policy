@@ -3,11 +3,13 @@ trained jointly with DQN-style Q-learning (experience replay + a periodic
 target network), no regret objective yet.
 
 Each episode is played against a randomly chosen scripted teammate from
-env.TEAMMATES. The point of training against a mix (rather than one
-teammate at a time) is that it gives the composer a reason to exist: the
-same basis has to be recombined differently depending on who it's paired
-with. This stage only asks "does it learn something reasonable?" -- returns
-should climb and success rate should rise well above a random policy.
+env.TRAIN_TEAMMATES (env.TEST_TEAMMATES is held out entirely -- see
+regret.py / diagnostic.py for the generalization check against it). The
+point of training against a mix (rather than one teammate at a time) is
+that it gives the composer a reason to exist: the same basis has to be
+recombined differently depending on who it's paired with. This stage only
+asks "does it learn something reasonable?" -- returns should climb and
+success rate should rise well above a random policy.
 
 The replay buffer + target network (standard DQN stabilizers) replace an
 earlier pure-online version of this loop, which -- on a harder teammate --
@@ -25,7 +27,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from env import GridWorld, TEAMMATES
+from env import GridWorld, TEAMMATES, TRAIN_TEAMMATES
 from ego_agent import EgoAgent, init_history, push_history
 
 
@@ -155,9 +157,9 @@ def train_agent(episodes=8000, gamma=0.95, lr=1e-3, eps_start=1.0, eps_end=0.05,
     optimizer = torch.optim.Adam(agent.parameters(), lr=lr)
     buffer = ReplayBuffer(buffer_capacity, seed=seed)
 
-    teammate_names = list(TEAMMATES.keys())
+    teammate_names = list(TRAIN_TEAMMATES.keys())
     envs = {
-        name: GridWorld(teammate=TEAMMATES[name], seed=seed + i)
+        name: GridWorld(teammate=TRAIN_TEAMMATES[name], seed=seed + i)
         for i, name in enumerate(teammate_names)
     }
 
@@ -218,9 +220,16 @@ def main():
                          target_update_every=args.target_update_every)
 
     print("\n--- final greedy evaluation (epsilon=0) ---")
-    for name in TEAMMATES:
+    print("train teammates:")
+    for name in TRAIN_TEAMMATES:
         avg_return, success_rate = evaluate(agent, name, args.eval_episodes, seed=args.seed + 100)
-        print(f"{name:12s}  avg_return={avg_return:+.2f}  success_rate={success_rate:.2f}")
+        print(f"  {name:12s}  avg_return={avg_return:+.2f}  success_rate={success_rate:.2f}")
+    print("held-out test teammates:")
+    for name in TEAMMATES:
+        if name in TRAIN_TEAMMATES:
+            continue
+        avg_return, success_rate = evaluate(agent, name, args.eval_episodes, seed=args.seed + 100)
+        print(f"  {name:12s}  avg_return={avg_return:+.2f}  success_rate={success_rate:.2f}")
 
     if args.save:
         torch.save(agent.state_dict(), args.save)

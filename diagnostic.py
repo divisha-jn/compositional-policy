@@ -21,13 +21,18 @@ Large gap, small regret  -> composer/routing problem: the basis is fine,
 Small gap, large regret  -> basis problem: no blend of the current K
                              components can reach oracle performance, so the
                              basis is missing a component.
+
+Reports this separately for env.TRAIN_TEAMMATES (what the Stage-3 agent
+trained on) and env.TEST_TEAMMATES (held out entirely from training), so a
+generalization failure (high gap/regret only on the held-out teammate) can
+be told apart from an in-distribution one.
 """
 
 import argparse
 
 import torch
 
-from env import GridWorld, TEAMMATES
+from env import GridWorld, TEAMMATES, TEST_TEAMMATES, TRAIN_TEAMMATES
 from train import evaluate, train_agent
 from regret import evaluate_policy, search_best_composition, train_oracle
 
@@ -61,6 +66,7 @@ def main():
     args = parser.parse_args()
 
     print("=== training Stage-3 compositional agent (basis to be frozen) ===")
+    print(f"(trained only on: {list(TRAIN_TEAMMATES)})")
     agent = train_agent(episodes=args.agent_episodes, gamma=args.gamma, lr=args.lr,
                          eps_start=args.eps_start, eps_end=args.eps_end,
                          seed=args.seed, verbose=True, num_components=args.num_components)
@@ -68,36 +74,39 @@ def main():
     for param in agent.basis.parameters():
         param.requires_grad_(False)
 
-    print("\n=== Stage 5: online composer vs. best fixed composition vs. oracle ===")
-    header = (f"{'teammate':14s}{'J(online)':>11s}{'J(best_w)':>11s}{'gap':>7s}"
-              f"{'J(oracle)':>11s}{'regret':>8s}  diagnosis")
-    print(header)
-    print("-" * len(header))
+    for group_label, teammate_names in [("TRAIN", list(TRAIN_TEAMMATES)),
+                                         ("HELD-OUT TEST", list(TEST_TEAMMATES))]:
+        print(f"\n=== Stage 5 ({group_label} teammates): "
+              f"online composer vs. best fixed composition vs. oracle ===")
+        header = (f"{'teammate':14s}{'J(online)':>11s}{'J(best_w)':>11s}{'gap':>7s}"
+                  f"{'J(oracle)':>11s}{'regret':>8s}  diagnosis")
+        print(header)
+        print("-" * len(header))
 
-    for name in TEAMMATES:
-        j_online, online_success = evaluate(agent, name, args.eval_episodes, seed=args.seed + 300)
+        for name in teammate_names:
+            j_online, online_success = evaluate(agent, name, args.eval_episodes, seed=args.seed + 300)
 
-        j_best_comp, best_w, bc_success = search_best_composition(
-            agent.basis, name, args.eval_episodes, seed=args.seed + 200,
-            resolution=args.search_resolution)
+            j_best_comp, best_w, bc_success = search_best_composition(
+                agent.basis, name, args.eval_episodes, seed=args.seed + 200,
+                resolution=args.search_resolution)
 
-        oracle_net = train_oracle(name, args.oracle_episodes, args.gamma, args.lr,
-                                   args.eps_start, args.eps_end, seed=args.seed + 1)
-        oracle_env = GridWorld(teammate=TEAMMATES[name], seed=args.seed + 100)
-        oracle_policy = lambda obs, net=oracle_net: int(torch.argmax(
-            net(torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)).squeeze(0)).item())
-        j_oracle, oracle_success = evaluate_policy(oracle_policy, oracle_env, args.eval_episodes)
+            oracle_net = train_oracle(name, args.oracle_episodes, args.gamma, args.lr,
+                                       args.eps_start, args.eps_end, seed=args.seed + 1)
+            oracle_env = GridWorld(teammate=TEAMMATES[name], seed=args.seed + 100)
+            oracle_policy = lambda obs, net=oracle_net: int(torch.argmax(
+                net(torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)).squeeze(0)).item())
+            j_oracle, oracle_success = evaluate_policy(oracle_policy, oracle_env, args.eval_episodes)
 
-        gap = j_best_comp - j_online
-        regret = j_oracle - j_best_comp
-        diagnosis = diagnose(gap, regret, args.gap_threshold, args.regret_threshold)
+            gap = j_best_comp - j_online
+            regret = j_oracle - j_best_comp
+            diagnosis = diagnose(gap, regret, args.gap_threshold, args.regret_threshold)
 
-        print(f"{name:14s}{j_online:11.2f}{j_best_comp:11.2f}{gap:7.2f}"
-              f"{j_oracle:11.2f}{regret:8.2f}  {diagnosis}")
-        print(f"{'':14s}(succ={online_success:.2f}) (succ={bc_success:.2f})"
-              f"{'':11s}(succ={oracle_success:.2f})")
-        w_str = "[" + ", ".join(f"{x:.2f}" for x in best_w) + "]"
-        print(f"{'':14s}best fixed w = {w_str}")
+            print(f"{name:14s}{j_online:11.2f}{j_best_comp:11.2f}{gap:7.2f}"
+                  f"{j_oracle:11.2f}{regret:8.2f}  {diagnosis}")
+            print(f"{'':14s}(succ={online_success:.2f}) (succ={bc_success:.2f})"
+                  f"{'':11s}(succ={oracle_success:.2f})")
+            w_str = "[" + ", ".join(f"{x:.2f}" for x in best_w) + "]"
+            print(f"{'':14s}best fixed w = {w_str}")
 
 
 if __name__ == "__main__":
