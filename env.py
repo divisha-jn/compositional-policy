@@ -1,16 +1,22 @@
 """Stage 1: a tiny cooperative gridworld for ad-hoc teamwork.
 
-Ego agent E and teammate agent T share a 5x5 grid with two goal cells.
-Both agents get a shared reward when they end up on the SAME goal cell at
-the same time. Which goal the teammate heads for (and how fast) depends on
-its scripted policy -- this is the "teammate type" the ego agent must adapt
-to.
+Ego agent E and teammate agent T share a 5x5 grid with goal cells (see
+GOALS). Both agents get a shared reward when they end up on the SAME goal
+cell at the same time. Which goal the teammate heads for (and how fast, and
+under what conditions) depends on its scripted policy -- this is the
+"teammate type" the ego agent must adapt to.
+
+Of the grid's 4 corners, (0,0) and (4,4) are goals A and B, (4,0) is the
+ego's own spawn point and also goal C, and (0,4) is the teammate's spawn
+point. (0,4) was deliberately NOT also made a goal: a teammate targeting
+its own spawn cell would never move at all (greedy-towards-self is always
+STAY) -- a degenerate case, not a meaningfully new corner to generalize to.
 """
 
 import numpy as np
 
 GRID_SIZE = 5
-GOALS = [(0, 0), (4, 4)]  # goal A, goal B
+GOALS = [(0, 0), (4, 4), (4, 0)]  # goal A, goal B, goal C
 
 # actions: up, down, left, right, stay
 ACTIONS = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
@@ -119,8 +125,13 @@ TRAIN_TEAMMATES = {
 # target as goal_a) but isn't identical to anything the agent trained
 # against (the move_prob=0.4 slowness is new) -- a deliberately "close but
 # not seen" probe, not a wildly different teammate.
+#
+# goal_c is the real corner-generalization test: it heads for goal C, a
+# corner neither goal_a, goal_b, nor wait_then_b ever uses -- entirely
+# unseen during training, not just a speed variant.
 TEST_TEAMMATES = {
     "slow_goal_a": ScriptedTeammate(goal_idx=0, move_prob=0.4, name="slow_goal_a"),
+    "goal_c": ScriptedTeammate(goal_idx=2, move_prob=1.0, name="goal_c"),
 }
 
 # Convenience union, for anything that looks a teammate up by name without
@@ -148,13 +159,10 @@ class GridWorld:
         return self._obs()
 
     def _obs(self):
-        """Full observation: normalized positions of both agents + both goals."""
-        vals = [
-            *self.ego_pos,
-            *self.teammate_pos,
-            *GOALS[0],
-            *GOALS[1],
-        ]
+        """Full observation: normalized positions of both agents + all goals."""
+        vals = [*self.ego_pos, *self.teammate_pos]
+        for goal in GOALS:
+            vals.extend(goal)
         return np.array(vals, dtype=np.float32) / (GRID_SIZE - 1)
 
     def step(self, ego_action):
@@ -185,4 +193,4 @@ class GridWorld:
         return "\n".join(lines)
 
 
-OBS_DIM = 8  # ego(2) + teammate(2) + goalA(2) + goalB(2)
+OBS_DIM = 4 + 2 * len(GOALS)  # ego(2) + teammate(2) + 2 per goal
