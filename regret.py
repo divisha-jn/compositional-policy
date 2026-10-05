@@ -53,10 +53,10 @@ def evaluate_policy(policy_fn, env, num_episodes):
     return float(np.mean(returns)), float(np.mean(successes))
 
 
-def train_oracle(teammate_name, episodes, gamma, lr, eps_start, eps_end, seed):
+def train_oracle(teammate, episodes, gamma, lr, eps_start, eps_end, seed):
     """Trains a plain Q-network (no history, no composer) from scratch
-    against a single scripted teammate -- the best-response oracle."""
-    env = GridWorld(teammate=TEAMMATES[teammate_name], seed=seed)
+    against a single scripted teammate object -- the best-response oracle."""
+    env = GridWorld(teammate=teammate, seed=seed)
     net = QComponent()
     optimizer = torch.optim.Adam(net.parameters(), lr=lr)
     rng = np.random.default_rng(seed)
@@ -104,7 +104,7 @@ def fixed_weight_policy(basis, weights):
     return policy_fn
 
 
-def search_best_composition(basis, teammate_name, num_episodes, seed, resolution=21):
+def search_best_composition(basis, teammate, num_episodes, seed, resolution=21):
     """Grid/random-searches fixed mixture weights w (on the simplex) for the
     frozen basis, and returns the best return found plus the winning w."""
     num_components = len(basis)
@@ -114,7 +114,7 @@ def search_best_composition(basis, teammate_name, num_episodes, seed, resolution
         rng = np.random.default_rng(seed)
         candidates = list(rng.dirichlet(np.ones(num_components), size=resolution * 10))
 
-    env = GridWorld(teammate=TEAMMATES[teammate_name], seed=seed)
+    env = GridWorld(teammate=teammate, seed=seed)
     best_return, best_weights, best_success = -np.inf, None, None
     for w in candidates:
         avg_return, success_rate = evaluate_policy(fixed_weight_policy(basis, w), env, num_episodes)
@@ -131,14 +131,15 @@ def report_regret(agent, teammate_names, oracle_episodes, gamma, lr, eps_start, 
     print("-" * len(header))
 
     for name in teammate_names:
-        oracle_net = train_oracle(name, oracle_episodes, gamma, lr, eps_start, eps_end, seed=seed + 1)
-        oracle_env = GridWorld(teammate=TEAMMATES[name], seed=seed + 100)
+        teammate = TEAMMATES[name]
+        oracle_net = train_oracle(teammate, oracle_episodes, gamma, lr, eps_start, eps_end, seed=seed + 1)
+        oracle_env = GridWorld(teammate=teammate, seed=seed + 100)
         oracle_policy = lambda obs, net=oracle_net: int(torch.argmax(
             net(torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)).squeeze(0)).item())
         j_best_response, br_success = evaluate_policy(oracle_policy, oracle_env, eval_episodes)
 
         j_best_composition, best_w, bc_success = search_best_composition(
-            agent.basis, name, eval_episodes, seed=seed + 200, resolution=search_resolution)
+            agent.basis, teammate, eval_episodes, seed=seed + 200, resolution=search_resolution)
 
         regret = j_best_response - j_best_composition
         w_str = "[" + ", ".join(f"{x:.2f}" for x in best_w) + "]"

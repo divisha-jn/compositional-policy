@@ -84,15 +84,16 @@ def main():
         print("-" * len(header))
 
         for name in teammate_names:
+            teammate = TEAMMATES[name]
             j_online, online_success = evaluate(agent, name, args.eval_episodes, seed=args.seed + 300)
 
             j_best_comp, best_w, bc_success = search_best_composition(
-                agent.basis, name, args.eval_episodes, seed=args.seed + 200,
+                agent.basis, teammate, args.eval_episodes, seed=args.seed + 200,
                 resolution=args.search_resolution)
 
-            oracle_net = train_oracle(name, args.oracle_episodes, args.gamma, args.lr,
+            oracle_net = train_oracle(teammate, args.oracle_episodes, args.gamma, args.lr,
                                        args.eps_start, args.eps_end, seed=args.seed + 1)
-            oracle_env = GridWorld(teammate=TEAMMATES[name], seed=args.seed + 100)
+            oracle_env = GridWorld(teammate=teammate, seed=args.seed + 100)
             oracle_policy = lambda obs, net=oracle_net: int(torch.argmax(
                 net(torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0)).squeeze(0)).item())
             j_oracle, oracle_success = evaluate_policy(oracle_policy, oracle_env, args.eval_episodes)

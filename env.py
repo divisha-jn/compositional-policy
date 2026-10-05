@@ -116,12 +116,21 @@ class WaitThenGoTeammate:
         return _greedy_action_towards(teammate_pos, target)
 
 
-# Stage-3 training set: goal preference (A vs B) and the "waits for the ego
+# Stage-3 training set: goal preference (A/B/C) and the "waits for the ego
 # to approach before committing to a goal" behavior.
+#
+# goal_c was added here (Stage E) after Stage D confirmed it was a pure
+# composer/routing failure, not a basis-capacity one (see regret.py /
+# diagnostic.py / teammate_diagnose.py): gap=12.30, regret=0.00, with the
+# best FIXED composition of the same basis nearly matching the oracle. The
+# fix for a composer problem is exposing the composer to that teammate
+# during training, not expanding the basis (that would be Stage 6, for a
+# genuine basis-capacity gap, which this wasn't).
 TRAIN_TEAMMATES = {
     "goal_a": ScriptedTeammate(goal_idx=0, move_prob=1.0, name="goal_a"),
     "goal_b": ScriptedTeammate(goal_idx=1, move_prob=1.0, name="goal_b"),
     "wait_then_b": WaitThenGoTeammate(goal_idx=1, trigger_distance=2, name="wait_then_b"),
+    "goal_c": ScriptedTeammate(goal_idx=2, move_prob=1.0, name="goal_c"),
 }
 
 # Held out of training entirely, for the Stage 4/5 generalization check.
@@ -130,12 +139,14 @@ TRAIN_TEAMMATES = {
 # against (the move_prob=0.4 slowness is new) -- a deliberately "close but
 # not seen" probe, not a wildly different teammate.
 #
-# goal_c is the real corner-generalization test: it heads for goal C, a
-# corner neither goal_a, goal_b, nor wait_then_b ever uses -- entirely
-# unseen during training, not just a speed variant.
+# goal_d (corner D, the teammate's own spawn point -- see the note above
+# GOALS) is the Stage E secondary check: now that goal_c has been folded
+# into training, does the composer's fix generalize to a DIFFERENT unseen
+# corner it still hasn't trained on, or was the fix narrowly specific to
+# corner C?
 TEST_TEAMMATES = {
     "slow_goal_a": ScriptedTeammate(goal_idx=0, move_prob=0.4, name="slow_goal_a"),
-    "goal_c": ScriptedTeammate(goal_idx=2, move_prob=1.0, name="goal_c"),
+    "goal_d": ScriptedTeammate(goal_idx=3, move_prob=1.0, name="goal_d"),
 }
 
 # Convenience union, for anything that looks a teammate up by name without
